@@ -14,11 +14,6 @@ object SassSpec extends Specification {
       val result = Sass.parseProperty(":font-size 10px")
       result.successful mustBe true
     }
-    "parse a list of properties" in {
-      val result = Sass.parseProperties(":font-size 10px\n:font-color black")
-      result.successful mustBe true
-      result.get must beEqualTo(List(Property("font-size", "10px"), Property("font-color", "black")))
-    }
     "parse a selector" in {
       val result = Sass.parseSelectors("div#main a img, .sidebar img")
       result.successful mustBe true
@@ -36,11 +31,6 @@ object SassSpec extends Specification {
       val result = Sass.parse("div#main a, .sidebar p\n  :font-size 10px\n  :font-color black\n  h1\n    span, div\n      :font-family Arial")
       result.successful mustBe true
       result.get.toString must beEqualTo("div#main a, .sidebar p { font-size:10px; font-color:black; }\ndiv#main a h1 span, div#main a h1 div, .sidebar p h1 span, .sidebar p h1 div { font-family:Arial; }\n")
-    }
-    "parse a list of nested properties" in {
-      val result = Sass.parseNestedProperties(":font\n  :size 10px\n  :color black")
-      result.successful mustBe true
-      result.get must beEqualTo(List(Property("font-size", "10px"), Property("font-color", "black")))
     }
     "parse a script with nested properties" in {
       val result = Sass.parse("div#main a, .sidebar p\n  :font\n    :size 10px\n    :color black\n")

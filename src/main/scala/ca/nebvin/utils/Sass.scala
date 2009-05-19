@@ -34,8 +34,7 @@ object ConstantCalculator  extends JavaTokenParsers {
     case x~None => x
     case x~Some(Op(o)~y) => o match {
       case "-" => x-y
-      case _ => x+y
-    }}
+      case _ => x+y}}
   
   def shortColor: Parser[String] = hexColor(3)
   def longColor: Parser[String] = hexColor(6)
@@ -118,41 +117,6 @@ object ConstantCalculator  extends JavaTokenParsers {
   }
 }
 
-
-
-case class Property(val name: String, val value: String) {
-  override def toString = name + ":" + value + ";"
-  def toString(constants: Map[String, String]): String = value match {
-    case ConstantValueRegex(x) =>
-      Property(name, ConstantCalculator.parse(ConstantCalculator.replaceConstants(x,constants))).toString
-    case x => toString
-  }
-  private val ConstantValueRegex = """=\s+(.*)""".r
-}
-case class Selector(val name: String) {
-  override def toString = name
-}
-case class RuleSet(val selectors: List[Selector], val properties: List[Property], val children: List[RuleSet]) {
-  override def toString: String = toString(Map(), Nil)
-  def toString(constants: Map[String, String], parentSelectors: List[Selector]): String = {
-    val curSelectors = parentSelectors match {
-      case Nil => selectors
-      case _ => parentSelectors.flatMap(p => selectors.map(s =>
-        if (s.name.contains("&")) Selector(s.name.replace("&", p.name)) else Selector(p.name+" "+s.name)))
-    }
-    (if (properties.isEmpty) "" else (curSelectors.mkString(", ")+" { "+properties.map(_.toString(constants)).mkString(" ")+" }\n"))+children.map(_.toString(constants, curSelectors)).mkString 
-  }
-}
-case class Script(val rules: List[RuleSet], val constants: List[Constant]) {
-  override def toString = {
-    val constantMap = constants.foldLeft(Map[String, String]()){(m,c) =>
-      m ++ Map(c.name -> ConstantCalculator.parse(ConstantCalculator.replaceConstants(c.value,m)))} 
-    rules.map(_.toString(constantMap, Nil)).mkString
-  }
-}
-
-case class Constant(val name: String, val value: String)
-
 class SassParsers extends RegexParsers {
   override val whiteSpace = "".r
   
@@ -193,6 +157,42 @@ class SassParsers extends RegexParsers {
   val sp = """\ *""".r
   val sp1 = """\ +""".r
   val lf = """\s*(\n|\z)""".r  
+
+  case class Property(val name: String, val value: String) {
+    override def toString = name + ":" + value + ";"
+    def toString(constants: Map[String, String]): String = value match {
+      case ConstantValueRegex(x) =>
+        Property(name, ConstantCalculator.parse(ConstantCalculator.replaceConstants(x,constants))).toString
+      case x => toString
+    }
+    private val ConstantValueRegex = """=\s+(.*)""".r
+  }
+
+  case class Selector(val name: String) {
+    override def toString = name
+  }
+
+  case class RuleSet(val selectors: List[Selector], val properties: List[Property], val children: List[RuleSet]) {
+    override def toString: String = toString(Map(), Nil)
+    def toString(constants: Map[String, String], parentSelectors: List[Selector]): String = {
+      val curSelectors = parentSelectors match {
+        case Nil => selectors
+        case _ => parentSelectors.flatMap(p => selectors.map(s =>
+          if (s.name.contains("&")) Selector(s.name.replace("&", p.name)) else Selector(p.name+" "+s.name)))
+      }
+      (if (properties.isEmpty) "" else (curSelectors.mkString(", ")+" { "+properties.map(_.toString(constants)).mkString(" ")+" }\n"))+children.map(_.toString(constants, curSelectors)).mkString
+    }
+  }
+
+  case class Script(val rules: List[RuleSet], val constants: List[Constant]) {
+    override def toString = {
+      val constantMap = constants.foldLeft(Map[String, String]()){(m,c) =>
+        m ++ Map(c.name -> ConstantCalculator.parse(ConstantCalculator.replaceConstants(c.value,m)))}
+      rules.map(_.toString(constantMap, Nil)).mkString
+    }
+  }
+
+  case class Constant(val name: String, val value: String)
 }
 
 object Sass extends SassParsers {
@@ -202,4 +202,3 @@ object Sass extends SassParsers {
   def parseSelectors(in: String) = parseAll(selectors(0), in)
   def parse(in: String) = parseAll(script, in)
 }
-
