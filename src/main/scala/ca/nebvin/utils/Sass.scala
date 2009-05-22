@@ -121,8 +121,18 @@ object ConstantCalculator  extends JavaTokenParsers {
 class SassParsers extends RegexParsers {
   override val whiteSpace = "".r
   
-  def script: Parser[Script] = ws~> rep(constant)~rep(ruleset(0)) <~ws ^^ {
-    case c~r => Script(r, c)}
+  def script: Parser[String] = ws~> rep1(rep(constant)~rep1(ruleset(0))) <~ws ^^ {
+    _.foldLeft(("",Map[String,String]())){(r,s) =>
+      val (css, constantMap) = r
+      s match {
+        case constants~rulesets => {
+          val newMap = constants.foldLeft(constantMap){(m,c) =>
+            m ++ Map(c.name -> ConstantCalculator.parse(ConstantCalculator.replaceConstants(c.value,m)))}
+          (css + rulesets.map(_.toString(newMap, Nil)).mkString, newMap)
+        }
+      }
+    }._1
+  }
   
   def constant: Parser[Constant] = ("""!\S+""".r <~sp~"=")~value <~lf ^^ {
     case k~v => Constant(k,v)}
@@ -185,21 +195,9 @@ class SassParsers extends RegexParsers {
     }
   }
 
-  case class Script(val rules: List[RuleSet], val constants: List[Constant]) {
-    override def toString = {
-      val constantMap = constants.foldLeft(Map[String, String]()){(m,c) =>
-        m ++ Map(c.name -> ConstantCalculator.parse(ConstantCalculator.replaceConstants(c.value,m)))}
-      rules.map(_.toString(constantMap, Nil)).mkString
-    }
-  }
-
   case class Constant(val name: String, val value: String)
 }
 
 object Sass extends SassParsers {
-  def parseProperty(in: String) = parseAll(property(0), in)
-  def parseProperties(in: String) = parseAll(properties(0), in)
-  def parseNestedProperties(in: String) = parseAll(nestedProperties(0), in)
-  def parseSelectors(in: String) = parseAll(selectors(0), in)
   def parse(in: String) = parseAll(script, in)
 }
