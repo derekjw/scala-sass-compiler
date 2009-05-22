@@ -2,18 +2,20 @@ package ca.nebvin.utils
 
 import scala.util.parsing.combinator._
 
-object ConstantCalculator  extends JavaTokenParsers {
-  def expr: Parser[CSSValue] = value ~ opt(op~expr) ^^ {
+class SassParsers extends JavaTokenParsers {
+  override val whiteSpace = "".r
+
+  def expr: Parser[CSSValue] = cssValue~opt(op~expr) ^^ {
     case x~None => x
     case x~Some(o~y) => o match {
       case Op("+") => x+y
       case Op("<<") => x<<y}}
   
-  def value: Parser[CSSValue] = parens | length | color | string | failure("Not a valid value")
+  def cssValue: Parser[CSSValue] = parens | length | color | string | failure("Not a valid value")
 
-  def parens: Parser[CSSValue] = "(" ~> expr <~ ")"
+  def parens: Parser[CSSValue] = sp~"("~sp~> expr <~sp~")"~sp
   
-  def op: Parser[Op] = opt("+" | "-" | "*" | "/") ^^ {
+  def op: Parser[Op] = sp~> opt("+"|"-"|"*"|"/") <~sp ^^ {
     case None => Op("<<")
     case Some(x) => Op(x)}
 
@@ -29,7 +31,7 @@ object ConstantCalculator  extends JavaTokenParsers {
       case Op("+") => x + y
       case Op("*") => x * y
       case Op("/") => x / y}}
-  def unit: Parser[String] = "em" | "px" | "pt" | "%"
+  def unit: Parser[String] = sp~>"em"|"px"|"pt"|"%"
   
   def color: Parser[CSSColor] = ((longColor | shortColor | wholeNumber) ^^ {CSSColor(_)} ^? {case Some(x) => x}) ~ opt(op~color) ^^ {
     case x~None => x
@@ -41,7 +43,13 @@ object ConstantCalculator  extends JavaTokenParsers {
   def longColor: Parser[String] = hexColor(6)
   def hexColor(length: Int): Parser[String] = ("""#[0-9a-fA-F]"""+"{"+length+"}").r
   
-  def parse(expression: String) = parseAll(expr, expression) match {
+  val ws = """\s*""".r
+  val ws1 = """\s+""".r
+  val sp = """\ *""".r
+  val sp1 = """\ +""".r
+  val lf = """\s*(\n|\z)""".r  
+  
+  def parseConstant(expression: String) = parseAll(expr, expression) match {
     case x if x.successful => x.get.toString
     case x => x.toString
   } 
@@ -116,10 +124,6 @@ object ConstantCalculator  extends JavaTokenParsers {
   case class Op(val value: String) {
     override def toString = value
   }
-}
-
-class SassParsers extends RegexParsers {
-  override val whiteSpace = "".r
   
   def script: Parser[String] = ws~> rep1(rep(constant)~rep1(ruleset(0))) <~ws ^^ {
     _.foldLeft(("",Map[String,String]())){(r,s) =>
@@ -127,7 +131,7 @@ class SassParsers extends RegexParsers {
       s match {
         case constants~rulesets => {
           val newMap = constants.foldLeft(constantMap){(m,c) =>
-            m ++ Map(c.name -> ConstantCalculator.parse(ConstantCalculator.replaceConstants(c.value,m)))}
+            m ++ Map(c.name -> parseConstant(replaceConstants(c.value,m)))}
           (css + rulesets.map(_.toString(newMap, Nil)).mkString, newMap)
         }
       }
@@ -163,17 +167,11 @@ class SassParsers extends RegexParsers {
   
   def indent(expected: Int): Parser[String] = ("""\ """+"{"+expected+"}").r 
   
-  val ws = """\s*""".r
-  val ws1 = """\s+""".r
-  val sp = """\ *""".r
-  val sp1 = """\ +""".r
-  val lf = """\s*(\n|\z)""".r  
-
   case class Property(val name: String, val value: String) {
     override def toString = name + ":" + value + ";"
     def toString(constants: Map[String, String]): String = value match {
       case ConstantValueRegex(x) =>
-        Property(name, ConstantCalculator.parse(ConstantCalculator.replaceConstants(x,constants))).toString
+        Property(name, parseConstant(replaceConstants(x,constants))).toString
       case x => toString
     }
     private val ConstantValueRegex = """=\s+(.*)""".r
