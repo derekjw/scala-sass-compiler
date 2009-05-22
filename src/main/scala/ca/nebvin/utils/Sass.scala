@@ -2,7 +2,14 @@ package ca.nebvin.utils
 
 import scala.util.parsing.combinator._
 
-class SassParsers extends JavaTokenParsers {
+object Sass {
+  def apply(in: String)= {
+    val c = new SassCompiler
+    c.parseAll(c.script, in)
+  }
+}
+
+class SassCompiler extends JavaTokenParsers {
   override val whiteSpace = "".r
 
   def expr: Parser[CSSValue] = cssValue~opt(op~expr) ^^ {
@@ -194,8 +201,4 @@ class SassParsers extends JavaTokenParsers {
   }
 
   case class Constant(val name: String, val value: String)
-}
-
-object Sass extends SassParsers {
-  def parse(in: String) = parseAll(script, in)
 }
