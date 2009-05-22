@@ -3,14 +3,15 @@ package ca.nebvin.utils
 import scala.util.parsing.combinator._
 
 object ConstantCalculator  extends JavaTokenParsers {
-    
   def expr: Parser[CSSValue] = value ~ opt(op~expr) ^^ {
     case x~None => x
     case x~Some(o~y) => o match {
       case Op("+") => x+y
       case Op("<<") => x<<y}}
   
-  def value: Parser[CSSValue] = ("(" ~> expr <~ ")") | length | color | string 
+  def value: Parser[CSSValue] = parens | length | color | string | failure("Not a valid value")
+
+  def parens: Parser[CSSValue] = "(" ~> expr <~ ")"
   
   def op: Parser[Op] = opt("+" | "-" | "*" | "/") ^^ {
     case None => Op("<<")
@@ -19,7 +20,7 @@ object ConstantCalculator  extends JavaTokenParsers {
   def string: Parser[CSSString] = (quotedString | unquotedString) ^^ {CSSString(_)}
   
   def quotedString: Parser[String] = "\"" ~> opt("""([^"\p{Cntrl}\\]|\\[\\/bfnrt]|\\u[a-fA-F0-9]{4})+""".r) <~ "\"" ^^ {_.getOrElse("")} 
-  def unquotedString: Parser[String] = """[^()]\S*""".r
+  def unquotedString: Parser[String] = """[^()"]\S*""".r
   
   def length: Parser[CSSLength] = (decimalNumber ~ opt(unit) ^^ {case x~u => CSSLength(x.toDouble, u)}) ~ opt(op~length) ^^ {
     case x~None => x
@@ -120,10 +121,10 @@ object ConstantCalculator  extends JavaTokenParsers {
 class SassParsers extends RegexParsers {
   override val whiteSpace = "".r
   
-  def script: Parser[Script] = ws ~> rep(constant) ~ rep(ruleset(0)) <~ ws ^^ {
+  def script: Parser[Script] = ws~> rep(constant)~rep(ruleset(0)) <~ws ^^ {
     case c~r => Script(r, c)}
   
-  def constant: Parser[Constant] = ("""!\S+""".r <~ sp ~ "=") ~ value <~ lf ^^ {
+  def constant: Parser[Constant] = ("""!\S+""".r <~sp~"=")~value <~lf ^^ {
     case k~v => Constant(k,v)}
   
   def ruleset(curIndent: Int): Parser[RuleSet] =
