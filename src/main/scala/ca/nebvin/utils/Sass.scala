@@ -12,11 +12,13 @@ object Sass {
 class SassCompiler extends JavaTokenParsers {
   override val whiteSpace = "".r
 
-  def expr: Parser[CSSValue] = cssValue~opt(op~expr) ^^ {
-    case x~None => x
-    case x~Some(o~y) => o match {
-      case Op("+") => x+y
-      case Op("<<") => x<<y}}
+  def expr: Parser[CSSValue] = cssValue~rep(op~expr) ^^ {
+    case x~Nil => x
+    case x~list => list.foldLeft(x)((r,n) => n match {
+        case o~y => o match {
+          case Op("+") => x+y
+          case Op("-") => x-y
+          case Op("<<") => x<<y}})}
   
   def cssValue: Parser[CSSValue] = parens | length | color | string | failure("Not a valid value")
 
@@ -40,11 +42,7 @@ class SassCompiler extends JavaTokenParsers {
       case Op("/") => x / y}}
   def unit: Parser[String] = sp~>"em"|"px"|"pt"|"%"
   
-  def color: Parser[CSSColor] = ((longColor | shortColor | wholeNumber) ^^ {CSSColor(_)} ^? {case Some(x) => x}) ~ opt(op~color) ^^ {
-    case x~None => x
-    case x~Some(Op(o)~y) => o match {
-      case "-" => x-y
-      case _ => x+y}}
+  def color: Parser[CSSColor] = (longColor | shortColor | wholeNumber) ^^ {CSSColor(_)} ^? {case Some(x) => x}
   
   def shortColor: Parser[String] = hexColor(3)
   def longColor: Parser[String] = hexColor(6)
@@ -69,10 +67,11 @@ class SassCompiler extends JavaTokenParsers {
   val ShortColor = """#([0-9a-fA-F]{1})([0-9a-fA-F]{1})([0-9a-fA-F]{1})""".r
   val LongColor = """#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})""".r
   
-  trait CSSValue {
+  sealed abstract class CSSValue {
     def + (that: CSSValue): CSSValue
     def + (that: String): CSSString = CSSString(toString+that)
     def << (that: CSSValue): CSSString = CSSString(toString+" "+that)
+    def - (that: CSSValue): CSSValue
   }
   
   object CSSString {
@@ -81,15 +80,17 @@ class SassCompiler extends JavaTokenParsers {
   
   class CSSString(val value: String) extends CSSValue {
     override def + (that: CSSValue) = CSSString(value + that.toString)
+    override def - (that: CSSValue): CSSValue = CSSString(toString+" "+that)
     override def toString = value
   }
   
   object CSSColor {
-    def apply(value:String) = value match {
+    def apply(value:String): Option[CSSColor] = value match {
       case LongColor(red, green, blue)  => Some(new CSSColor(red,green,blue))
       case ShortColor(red, green, blue) => Some(new CSSColor(red+red,green+green,blue+blue))
       case rgb if (rgb == rgb.toInt.toString) => Some(new CSSColor(rgb.toInt, rgb.toInt, rgb.toInt))
       case _ => None}
+    def apply(value:CSSValue): Option[CSSColor] = CSSColor(value.toString)
     def apply(red: Int, green: Int, blue: Int) = new CSSColor(red, green, blue)
   }
 
@@ -99,9 +100,15 @@ class SassCompiler extends JavaTokenParsers {
            Integer.valueOf(strGreen, 16).intValue(),
            Integer.valueOf(strBlue, 16).intValue())
     override def toString = "#" + colorHex(red) + colorHex(green) + colorHex(blue)
-    override def + (that: CSSValue) = CSSString(toString + that)
+    override def + (that: CSSValue): CSSValue = CSSColor(that) match {
+      case Some(c) => this + c
+      case None => CSSString(toString) + that
+    }
     def + (that: CSSColor): CSSColor = CSSColor(red + that.red, green + that.green, blue + that.blue)
-    def - (that: CSSColor): CSSColor = CSSColor(red - that.red, green - that.green, blue - that.blue)
+    override def - (that: CSSValue): CSSValue = CSSColor(that) match {
+      case Some(c) => CSSColor(red - c.red, green - c.green, blue - c.blue)
+      case None => CSSString(toString) - that
+    }
     def + (that: Int): CSSColor = CSSColor(red + that, green + that, blue + that)
     private def colorHex(value: Int): String = value match {
       case x if x > 255 => "FF"
@@ -122,6 +129,7 @@ class SassCompiler extends JavaTokenParsers {
        else value.toString) + unit.getOrElse("")
     }
     override def + (that: CSSValue) = CSSString(toString + that)
+    override def - (that: CSSValue) = CSSString(toString) - that
     def + (that: CSSLength): CSSLength = CSSLength(value + that.value, unit)
     def - (that: CSSLength): CSSLength = CSSLength(value - that.value, unit)
     def * (that: CSSLength): CSSLength = CSSLength(value * that.value, unit)
