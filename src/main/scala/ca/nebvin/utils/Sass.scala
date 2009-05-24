@@ -77,28 +77,28 @@ class SassCompiler extends JavaTokenParsers {
       if (rounded.toDouble == value) rounded.toString else value.toString
     }
     override def + (that: CSSValue): CSSValue = that match {
-      case CSSNumber(n) => CSSNumber(this.value + n)
+      case n: CSSNumber => this + n 
       case _ => super.+(that)
     }
+    def + (that: CSSNumber): CSSNumber = CSSNumber(value + that.value)
     override def - (that: CSSValue): CSSValue = that match {
-      case CSSNumber(n) => CSSNumber(this.value - n)
+      case n: CSSNumber => this - n
       case _ => super.-(that)
     }
+    def - (that: CSSNumber): CSSNumber = CSSNumber(value - that.value)
     override def * (that: CSSValue): CSSValue = that match {
-      case CSSNumber(n) => CSSNumber(this.value * n)
+      case n: CSSNumber => this * n
       case _ => super.*(that)
     }
+    def * (that: CSSNumber): CSSNumber = CSSNumber(value * that.value)
     override def / (that: CSSValue): CSSValue = that match {
-      case CSSNumber(n) => CSSNumber(this.value / n)
+      case n: CSSNumber => this / n
       case _ => super./(that)
     }
+    def / (that: CSSNumber): CSSNumber = CSSNumber(value / that.value)
   }
   
-  object CSSString {
-    def apply(value: String) = new CSSString(value)
-  }
-  
-  class CSSString(val value: String) extends CSSValue {
+  case class CSSString(value: String) extends CSSValue {
     override def toString = value
   }
   
@@ -106,10 +106,14 @@ class SassCompiler extends JavaTokenParsers {
     def apply(value:String): Option[CSSColor] = value match {
       case LongColor(red, green, blue)  => Some(new CSSColor(red,green,blue))
       case ShortColor(red, green, blue) => Some(new CSSColor(red+red,green+green,blue+blue))
-      case rgb if (rgb == rgb.toInt.toString) => Some(new CSSColor(rgb.toInt, rgb.toInt, rgb.toInt))
       case _ => None}
     def apply(value:CSSValue): Option[CSSColor] = CSSColor(value.toString)
+    def apply(number:CSSNumber): CSSColor = {
+      val rgb = number.value.toInt
+      CSSColor(rgb,rgb,rgb)
+    }
     def apply(red: Int, green: Int, blue: Int) = new CSSColor(red, green, blue)
+    def unapply(in: CSSColor): Option[(Int, Int, Int)] = Some((in.red, in.green, in.blue))
   }
 
   class CSSColor(val red: Int, val green: Int, val blue: Int) extends CSSValue {
@@ -118,16 +122,16 @@ class SassCompiler extends JavaTokenParsers {
            Integer.valueOf(strGreen, 16).intValue(),
            Integer.valueOf(strBlue, 16).intValue())
     override def toString = "#" + colorHex(red) + colorHex(green) + colorHex(blue)
-    override def + (that: CSSValue): CSSValue = CSSColor(that) match {
-      case Some(c) => this + c
-      case None => super.+(that)
+    override def + (that: CSSValue): CSSValue = that match {
+      case CSSColor(r,g,b) => CSSColor(red + r, green + g, blue + b)
+      case n: CSSNumber => this + CSSColor(n)
+      case _ => super.+(that)
     }
-    def + (that: CSSColor): CSSColor = CSSColor(red + that.red, green + that.green, blue + that.blue)
-    override def - (that: CSSValue): CSSValue = CSSColor(that) match {
-      case Some(c) => this - c
-      case None => super.-(that)
+    override def - (that: CSSValue): CSSValue = that match {
+      case CSSColor(r,g,b) => CSSColor(red - r, green - g, blue - b)
+      case n: CSSNumber => this - CSSColor(n)
+      case _ => super.-(that)
     }
-    def - (that: CSSColor): CSSColor = CSSColor(red - that.red, green - that.green, blue - that.blue)
     private def colorHex(value: Int): String = value match {
       case x if x > 255 => "FF"
       case x if x < 0 => "00"
@@ -139,29 +143,26 @@ class SassCompiler extends JavaTokenParsers {
   object CSSLength {
     def apply(n: Double, unit: String): CSSLength = CSSLength(CSSNumber(n), unit)
     def apply(n: CSSNumber, unit: String): CSSLength = new CSSLength(n, unit)
-    def apply(n: CSSValue, unit: String): Option[CSSLength] = n match {
-      case CSSNumber(n) => Some(CSSLength(n, unit))
-      case _ => None
-    }
+    def unapply(in: CSSLength): Option[(CSSNumber, String)] = Some(in.value, in.unit)
   }
 
   class CSSLength(val value: CSSNumber, val unit: String) extends CSSValue {
     override def toString =
       value.toString + unit
     override def + (that: CSSValue): CSSValue = that match {
-      case x: CSSLength => CSSLength(value + x.value, unit).getOrElse(super.+(x))
+      case CSSLength(x,_) => CSSLength(value + x, unit)
       case x => super.+(x)
     }
     override def - (that: CSSValue): CSSValue = that match {
-      case x: CSSLength => CSSLength(value - x.value, unit).getOrElse(super.+(x))
+      case CSSLength(x,_) => CSSLength(value - x, unit)
       case x => super.-(x)
     }
     override def * (that: CSSValue): CSSValue = that match {
-      case x: CSSLength => CSSLength(value * x.value, unit).getOrElse(super.+(x))
+      case CSSLength(x,_) => CSSLength(value * x, unit)
       case x => super.*(x)
     }
     override def / (that: CSSValue): CSSValue = that match {
-      case x: CSSLength => CSSLength(value / x.value, unit).getOrElse(super.+(x))
+      case CSSLength(x,_) => CSSLength(value / x, unit)
       case x => super./(x)
     }
   }
