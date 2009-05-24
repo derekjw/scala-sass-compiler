@@ -12,36 +12,43 @@ object Sass {
 class SassCompiler extends JavaTokenParsers {
   override val whiteSpace = "".r
 
-  def expr: Parser[CSSValue] = cssValue~rep(op~cssValue) ^^ {
+  def expr: Parser[Value] = cssValue~rep(op~cssValue) ^^ {
     case x~list => list.foldLeft(x)((r,n) => n match {case o~y => o(r,y)})
   }
   
-  def cssValue: Parser[CSSValue] = parens | length | number | color | string | failure("Not a valid value")
+  def cssValue: Parser[Value] = parens | length | number | color | string | failure("Not a valid value")
 
-  def parens: Parser[CSSValue] = sp~"("~sp~> expr <~sp~")"~sp
+  def parens: Parser[Value] = sp~"("~sp~> expr <~sp~")"~sp
   
-  def op: Parser[(CSSValue, CSSValue) => CSSValue] =
-    sp~> opt( "+" ^^^ {(l: CSSValue, r: CSSValue) => l + r}
-            | "-" ^^^ {(l: CSSValue, r: CSSValue) => l - r}
-            | "*" ^^^ {(l: CSSValue, r: CSSValue) => l * r}
-            | "/" ^^^ {(l: CSSValue, r: CSSValue) => l / r}
-            ) <~sp ^^ {_.getOrElse((l: CSSValue, r: CSSValue) => l << r)}
+  def op: Parser[(Value, Value) => Value] =
+    sp~> opt( "+" ^^^ {(l: Value, r: Value) => l + r}
+            | "-" ^^^ {(l: Value, r: Value) => l - r}
+            | "*" ^^^ {(l: Value, r: Value) => l * r}
+            | "/" ^^^ {(l: Value, r: Value) => l / r}
+            ) <~sp ^^ {_.getOrElse((l: Value, r: Value) => l << r)}
 
-  def number: Parser[CSSNumber] = decimalNumber ^^ {x => CSSNumber(x.toDouble)}
+  def number: Parser[Number] = decimalNumber ^^ {x => Number(x.toDouble)}
 
-  def string: Parser[CSSString] = (quotedString | unquotedString) ^^ {CSSString(_)}
+  def string: Parser[Text] = (quotedString | unquotedString) ^^ {Text(_)}
   
   def quotedString: Parser[String] = "\"" ~> opt("""([^"\p{Cntrl}\\]|\\[\\/bfnrt]|\\u[a-fA-F0-9]{4})+""".r) <~ "\"" ^^ {_.getOrElse("")} 
   def unquotedString: Parser[String] = """[^()"]\S*""".r
   
-  def length: Parser[CSSLength] = number ~ unit ^^ {case x~u => CSSLength(x, u)}
+  def length: Parser[Length] = number ~ unit ^^ {case Number(x)~u => Length(x, u)}
   def unit: Parser[String] = sp~>"em"|"px"|"pt"|"%"
   
-  def color: Parser[CSSColor] = (longColor | shortColor | wholeNumber) ^^ {CSSColor(_)} ^? {case Some(x) => x}
+  def color: Parser[Color] = longColor | shortColor
   
-  def shortColor: Parser[String] = hexColor(3)
-  def longColor: Parser[String] = hexColor(6)
-  def hexColor(length: Int): Parser[String] = ("""#[0-9a-fA-F]"""+"{"+length+"}").r
+  def shortColor: Parser[Color] = "#"~>repN(3, hexColor(1)) ^^ {x =>
+    val ints: List[Int] = x.map(h => hex2Int(h+h))
+    Color(ints(0),ints(1),ints(2))
+  }
+  def longColor: Parser[Color] = "#"~>repN(3, hexColor(2)) ^^ {x =>
+    val ints: List[Int] = x.map(h => hex2Int(h))
+    Color(ints(0),ints(1),ints(2))
+  }
+  def hexColor(length: Int): Parser[String] = ("""[0-9a-fA-F]{"""+length+"}").r
+  def hex2Int(hex: String): Int = Integer.valueOf(hex, 16).intValue()
   
   val ws = """\s*""".r
   val ws1 = """\s+""".r
@@ -62,107 +69,75 @@ class SassCompiler extends JavaTokenParsers {
   val ShortColor = """#([0-9a-fA-F]{1})([0-9a-fA-F]{1})([0-9a-fA-F]{1})""".r
   val LongColor = """#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})""".r
   
-  sealed abstract class CSSValue {
-    def << (that: CSSValue): CSSString = CSSString(toString+" "+that)
-    def + (that: CSSValue): CSSValue = CSSString(toString+that)
-    def + (that: String): CSSString = CSSString(toString+that)
-    def - (that: CSSValue): CSSValue = CSSString(toString+"-"+that)
-    def * (that: CSSValue): CSSValue = CSSString(toString+"*"+that)
-    def / (that: CSSValue): CSSValue = CSSString(toString+"/"+that)
+  sealed abstract class Value {
+    type ValueOp = (Value,Value) => Value
+    type NumberOp = (Double,Double) => Double
+    def << (that: Value): Value = Text(toString+" "+that)
+    def + (that: String): Text = Text(toString+that)
+    def + (that: Value): Value = oper(that, (_+_), (_+_))
+    def - (that: Value): Value = oper(that, (_-_), (_-_))
+    def * (that: Value): Value = oper(that, (_*_), (_*_))
+    def / (that: Value): Value = oper(that, (_/_), (_/_))
+    protected def oper(that: Value, o:ValueOp, n:NumberOp): Value = o(Text(toString), that)
   }
 
-  case class CSSNumber(value: Double) extends CSSValue {
-    override def toString = {
-      val rounded = value.round
-      if (rounded.toDouble == value) rounded.toString else value.toString
+  object Value {
+    implicit def int2Number(in: Int) = Number(in.toDouble)
+    implicit def value2Int(in: Value) = in match {
+      case Number(x) => x.toInt
+      case _ => 0
     }
-    override def + (that: CSSValue): CSSValue = that match {
-      case n: CSSNumber => this + n 
-      case _ => super.+(that)
-    }
-    def + (that: CSSNumber): CSSNumber = CSSNumber(value + that.value)
-    override def - (that: CSSValue): CSSValue = that match {
-      case n: CSSNumber => this - n
-      case _ => super.-(that)
-    }
-    def - (that: CSSNumber): CSSNumber = CSSNumber(value - that.value)
-    override def * (that: CSSValue): CSSValue = that match {
-      case n: CSSNumber => this * n
-      case _ => super.*(that)
-    }
-    def * (that: CSSNumber): CSSNumber = CSSNumber(value * that.value)
-    override def / (that: CSSValue): CSSValue = that match {
-      case n: CSSNumber => this / n
-      case _ => super./(that)
-    }
-    def / (that: CSSNumber): CSSNumber = CSSNumber(value / that.value)
   }
-  
-  case class CSSString(value: String) extends CSSValue {
+
+  case class Number(value: Double) extends Value {
+    override def toString = {
+      val whole = value.round
+      if (whole.toDouble == value) whole.toString else value.toString
+    }
+    override def oper(that: Value, o:ValueOp, n:NumberOp): Value = that match {
+      case Number(x) => Number(n(value,x))
+      case _ => super.oper(that,o,n)
+    }
+  }
+
+  case class Text(value: String) extends Value {
+    override def + (that: Value): Value = this+that.toString
+    override def - (that: Value): Value = this+"-"+that.toString
+    override def * (that: Value): Value = this+"*"+that.toString
+    override def / (that: Value): Value = this+"/"+that.toString
     override def toString = value
   }
   
-  object CSSColor {
-    def apply(value:String): Option[CSSColor] = value match {
-      case LongColor(red, green, blue)  => Some(new CSSColor(red,green,blue))
-      case ShortColor(red, green, blue) => Some(new CSSColor(red+red,green+green,blue+blue))
-      case _ => None}
-    def apply(value:CSSValue): Option[CSSColor] = CSSColor(value.toString)
-    def apply(number:CSSNumber): CSSColor = {
-      val rgb = number.value.toInt
-      CSSColor(rgb,rgb,rgb)
-    }
-    def apply(red: Int, green: Int, blue: Int) = new CSSColor(red, green, blue)
-    def unapply(in: CSSColor): Option[(Int, Int, Int)] = Some((in.red, in.green, in.blue))
-  }
-
-  class CSSColor(val red: Int, val green: Int, val blue: Int) extends CSSValue {
-    def this(strRed: String, strGreen: String, strBlue: String) =
-      this(Integer.valueOf(strRed, 16).intValue(),
-           Integer.valueOf(strGreen, 16).intValue(),
-           Integer.valueOf(strBlue, 16).intValue())
+  case class Color(red: Int, green: Int, blue: Int) extends Value {
     override def toString = "#" + colorHex(red) + colorHex(green) + colorHex(blue)
-    override def + (that: CSSValue): CSSValue = that match {
-      case CSSColor(r,g,b) => CSSColor(red + r, green + g, blue + b)
-      case n: CSSNumber => this + CSSColor(n)
-      case _ => super.+(that)
-    }
-    override def - (that: CSSValue): CSSValue = that match {
-      case CSSColor(r,g,b) => CSSColor(red - r, green - g, blue - b)
-      case n: CSSNumber => this - CSSColor(n)
-      case _ => super.-(that)
+    override def oper(that: Value, o: ValueOp, n: NumberOp): Value = that match {
+      case Color(r,g,b) => Color(n(red,r).toInt, n(green,g).toInt, n(blue,b).toInt)
+      case Number(n) => o(this,Color(n.toInt,n.toInt,n.toInt))
+      case _ => o(this.asInstanceOf[Value],that)
     }
     private def colorHex(value: Int): String = value match {
       case x if x > 255 => "FF"
       case x if x < 0 => "00"
       case x => String.format("%02X", int2Integer(x))
     }
-    def hex2Int(hex: String): Int = Integer.valueOf(hex, 16).intValue()
   }
   
-  object CSSLength {
-    def apply(n: Double, unit: String): CSSLength = CSSLength(CSSNumber(n), unit)
-    def apply(n: CSSNumber, unit: String): CSSLength = new CSSLength(n, unit)
-    def unapply(in: CSSLength): Option[(CSSNumber, String)] = Some(in.value, in.unit)
-  }
-
-  class CSSLength(val value: CSSNumber, val unit: String) extends CSSValue {
-    override def toString =
-      value.toString + unit
-    override def + (that: CSSValue): CSSValue = that match {
-      case CSSLength(x,_) => CSSLength(value + x, unit)
+  case class Length(number: Double, unit: String) extends Number(number) {
+    override def toString = super.toString + unit
+    override def + (that: Value): Value = that match {
+      case Length(x,_) => Length(value + x, unit)
       case x => super.+(x)
     }
-    override def - (that: CSSValue): CSSValue = that match {
-      case CSSLength(x,_) => CSSLength(value - x, unit)
+    override def - (that: Value): Value = that match {
+      case Length(x,_) => Length(value - x, unit)
       case x => super.-(x)
     }
-    override def * (that: CSSValue): CSSValue = that match {
-      case CSSLength(x,_) => CSSLength(value * x, unit)
+    override def * (that: Value): Value = that match {
+      case Length(x,_) => Length(value * x, unit)
       case x => super.*(x)
     }
-    override def / (that: CSSValue): CSSValue = that match {
-      case CSSLength(x,_) => CSSLength(value / x, unit)
+    override def / (that: Value): Value = that match {
+      case Length(x,_) => Length(value / x, unit)
       case x => super./(x)
     }
   }
