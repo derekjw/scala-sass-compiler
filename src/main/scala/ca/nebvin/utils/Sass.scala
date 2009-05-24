@@ -16,7 +16,7 @@ class SassCompiler extends JavaTokenParsers {
     case x~list => list.foldLeft(x)((r,n) => n match {case o~y => o(r,y)})
   }
   
-  def cssValue: Parser[CSSValue] = parens | length | color | string | failure("Not a valid value")
+  def cssValue: Parser[CSSValue] = parens | length | number | color | string | failure("Not a valid value")
 
   def parens: Parser[CSSValue] = sp~"("~sp~> expr <~sp~")"~sp
   
@@ -27,12 +27,14 @@ class SassCompiler extends JavaTokenParsers {
             | "/" ^^^ {(l: CSSValue, r: CSSValue) => l / r}
             ) <~sp ^^ {_.getOrElse((l: CSSValue, r: CSSValue) => l << r)}
 
+  def number: Parser[CSSNumber] = decimalNumber ^^ {x => CSSNumber(x.toDouble)}
+
   def string: Parser[CSSString] = (quotedString | unquotedString) ^^ {CSSString(_)}
   
   def quotedString: Parser[String] = "\"" ~> opt("""([^"\p{Cntrl}\\]|\\[\\/bfnrt]|\\u[a-fA-F0-9]{4})+""".r) <~ "\"" ^^ {_.getOrElse("")} 
   def unquotedString: Parser[String] = """[^()"]\S*""".r
   
-  def length: Parser[CSSLength] = decimalNumber ~ opt(unit) ^^ {case x~u => CSSLength(x.toDouble, u)}
+  def length: Parser[CSSLength] = number ~ unit ^^ {case x~u => CSSLength(x, u)}
   def unit: Parser[String] = sp~>"em"|"px"|"pt"|"%"
   
   def color: Parser[CSSColor] = (longColor | shortColor | wholeNumber) ^^ {CSSColor(_)} ^? {case Some(x) => x}
@@ -67,6 +69,29 @@ class SassCompiler extends JavaTokenParsers {
     def - (that: CSSValue): CSSValue = CSSString(toString+"-"+that)
     def * (that: CSSValue): CSSValue = CSSString(toString+"*"+that)
     def / (that: CSSValue): CSSValue = CSSString(toString+"/"+that)
+  }
+
+  case class CSSNumber(value: Double) extends CSSValue {
+    override def toString = {
+      val rounded = value.round
+      if (rounded.toDouble == value) rounded.toString else value.toString
+    }
+    override def + (that: CSSValue): CSSValue = that match {
+      case CSSNumber(n) => CSSNumber(this.value + n)
+      case _ => super.+(that)
+    }
+    override def - (that: CSSValue): CSSValue = that match {
+      case CSSNumber(n) => CSSNumber(this.value - n)
+      case _ => super.-(that)
+    }
+    override def * (that: CSSValue): CSSValue = that match {
+      case CSSNumber(n) => CSSNumber(this.value * n)
+      case _ => super.*(that)
+    }
+    override def / (that: CSSValue): CSSValue = that match {
+      case CSSNumber(n) => CSSNumber(this.value / n)
+      case _ => super./(that)
+    }
   }
   
   object CSSString {
@@ -112,22 +137,33 @@ class SassCompiler extends JavaTokenParsers {
   }
   
   object CSSLength {
-    def apply(value: Double, unit: Option[String]) = new CSSLength(value, unit)
+    def apply(n: Double, unit: String): CSSLength = CSSLength(CSSNumber(n), unit)
+    def apply(n: CSSNumber, unit: String): CSSLength = new CSSLength(n, unit)
+    def apply(n: CSSValue, unit: String): Option[CSSLength] = n match {
+      case CSSNumber(n) => Some(CSSLength(n, unit))
+      case _ => None
+    }
   }
 
-  class CSSLength(val value: Double, val unit: Option[String]) extends CSSValue {
-    override def toString = {
-      val rounded = value.round
-      (if (rounded.toDouble == value) rounded.toString
-       else value.toString) + unit.getOrElse("")
-    }
+  class CSSLength(val value: CSSNumber, val unit: String) extends CSSValue {
+    override def toString =
+      value.toString + unit
     override def + (that: CSSValue): CSSValue = that match {
-      case x: CSSLength => CSSLength(value + x.value, unit)
+      case x: CSSLength => CSSLength(value + x.value, unit).getOrElse(super.+(x))
       case x => super.+(x)
     }
-    def - (that: CSSLength): CSSLength = CSSLength(value - that.value, unit)
-    def * (that: CSSLength): CSSLength = CSSLength(value * that.value, unit)
-    def / (that: CSSLength): CSSLength = CSSLength(value / that.value, unit)
+    override def - (that: CSSValue): CSSValue = that match {
+      case x: CSSLength => CSSLength(value - x.value, unit).getOrElse(super.+(x))
+      case x => super.-(x)
+    }
+    override def * (that: CSSValue): CSSValue = that match {
+      case x: CSSLength => CSSLength(value * x.value, unit).getOrElse(super.+(x))
+      case x => super.*(x)
+    }
+    override def / (that: CSSValue): CSSValue = that match {
+      case x: CSSLength => CSSLength(value / x.value, unit).getOrElse(super.+(x))
+      case x => super./(x)
+    }
   }
 
   def script: Parser[String] = ws~> rep1(rep(constant)~rep1(ruleset(0))) <~ws ^^ {
