@@ -12,24 +12,20 @@ object Sass {
 class SassCompiler extends JavaTokenParsers {
   override val whiteSpace = "".r
 
-  def expr: Parser[CSSValue] = cssValue~rep(op~expr) ^^ {
-    case x~Nil => x
-    case x~list => list.foldLeft(x)((r,n) => n match {
-        case o~y => o match {
-          case Op("+") => x+y
-          case Op("-") => x-y
-          case Op("<<") => x<<y
-          case Op("*") => x * y
-          case Op("/") => x / y
-    }})}
+  def expr: Parser[CSSValue] = cssValue~rep(op~cssValue) ^^ {
+    case x~list => list.foldLeft(x)((r,n) => n match {case o~y => o(r,y)})
+  }
   
   def cssValue: Parser[CSSValue] = parens | length | color | string | failure("Not a valid value")
 
   def parens: Parser[CSSValue] = sp~"("~sp~> expr <~sp~")"~sp
   
-  def op: Parser[Op] = sp~> opt("+"|"-"|"*"|"/") <~sp ^^ {
-    case None => Op("<<")
-    case Some(x) => Op(x)}
+  def op: Parser[(CSSValue, CSSValue) => CSSValue] =
+    sp~> opt( "+" ^^^ {(l: CSSValue, r: CSSValue) => l + r}
+            | "-" ^^^ {(l: CSSValue, r: CSSValue) => l - r}
+            | "*" ^^^ {(l: CSSValue, r: CSSValue) => l * r}
+            | "/" ^^^ {(l: CSSValue, r: CSSValue) => l / r}
+            ) <~sp ^^ {_.getOrElse((l: CSSValue, r: CSSValue) => l << r)}
 
   def string: Parser[CSSString] = (quotedString | unquotedString) ^^ {CSSString(_)}
   
@@ -134,10 +130,6 @@ class SassCompiler extends JavaTokenParsers {
     def / (that: CSSLength): CSSLength = CSSLength(value / that.value, unit)
   }
 
-  case class Op(val value: String) {
-    override def toString = value
-  }
-  
   def script: Parser[String] = ws~> rep1(rep(constant)~rep1(ruleset(0))) <~ws ^^ {
     _.foldLeft(("",Map[String,String]())){(r,s) =>
       val (css, constantMap) = r
