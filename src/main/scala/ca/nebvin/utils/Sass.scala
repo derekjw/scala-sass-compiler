@@ -82,19 +82,11 @@ class SassCompiler extends JavaTokenParsers {
   }
 
   object Value {
-    implicit def int2Number(in: Int) = Number(in.toDouble)
-    implicit def value2Int(in: Value) = in match {
-      case Number(x) => x.toInt
-      case _ => 0
-    }
     implicit def text2String(in: Text) = in.toString
   }
 
   case class Number(value: Double) extends Value {
-    override def toString = {
-      val whole = value.round
-      if (whole.toDouble == value) whole.toString else value.toString
-    }
+    override def toString = """\.0+$""".r.replaceFirstIn(value.toString, "")
     override def oper(that: Value, o:ValueOp, n:NumberOp): Value = that match {
       case Number(x) => Number(n(value,x))
       case _ => super.oper(that,o,n)
