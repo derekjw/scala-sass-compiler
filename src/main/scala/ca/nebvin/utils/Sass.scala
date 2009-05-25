@@ -34,7 +34,7 @@ class SassCompiler extends JavaTokenParsers {
   def quotedString: Parser[String] = "\"" ~> opt("""([^"\p{Cntrl}\\]|\\[\\/bfnrt]|\\u[a-fA-F0-9]{4})+""".r) <~ "\"" ^^ {_.getOrElse("")} 
   def unquotedString: Parser[String] = """[^()"]\S*""".r
   
-  def length: Parser[Length] = number ~ unit ^^ {case Number(x)~u => Length(x, u)}
+  def length: Parser[Length] = number ~ unit ^^ {case x~u => Length(x, u)}
   def unit: Parser[String] = sp~>"em"|"px"|"pt"|"%"
   
   def color: Parser[Color] = longColor | shortColor
@@ -87,6 +87,7 @@ class SassCompiler extends JavaTokenParsers {
       case Number(x) => x.toInt
       case _ => 0
     }
+    implicit def text2String(in: Text) = in.toString
   }
 
   case class Number(value: Double) extends Value {
@@ -113,7 +114,7 @@ class SassCompiler extends JavaTokenParsers {
     override def oper(that: Value, o: ValueOp, n: NumberOp): Value = that match {
       case Color(r,g,b) => Color(n(red,r).toInt, n(green,g).toInt, n(blue,b).toInt)
       case Number(n) => o(this,Color(n.toInt,n.toInt,n.toInt))
-      case _ => o(this.asInstanceOf[Value],that)
+      case _ => super.oper(that,o,n)
     }
     private def colorHex(value: Int): String = value match {
       case x if x > 255 => "FF"
@@ -122,23 +123,12 @@ class SassCompiler extends JavaTokenParsers {
     }
   }
   
-  case class Length(number: Double, unit: String) extends Number(number) {
-    override def toString = super.toString + unit
-    override def + (that: Value): Value = that match {
-      case Length(x,_) => Length(value + x, unit)
-      case x => super.+(x)
-    }
-    override def - (that: Value): Value = that match {
-      case Length(x,_) => Length(value - x, unit)
-      case x => super.-(x)
-    }
-    override def * (that: Value): Value = that match {
-      case Length(x,_) => Length(value * x, unit)
-      case x => super.*(x)
-    }
-    override def / (that: Value): Value = that match {
-      case Length(x,_) => Length(value / x, unit)
-      case x => super./(x)
+  case class Length(value: Number, unit: String) extends Value {
+    override def toString = value + unit
+    override def oper(that: Value, o:ValueOp, n:NumberOp): Value = that match {
+      case Length(x,_) => Length(o(value,x).asInstanceOf[Number], unit)
+      case x: Number => Length(o(value,x).asInstanceOf[Number], unit)
+      case _ => super.oper(that,o,n)
     }
   }
 
