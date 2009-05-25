@@ -12,11 +12,11 @@ object Sass {
 class SassCompiler extends JavaTokenParsers {
   override val whiteSpace = "".r
 
-  def expr: Parser[Value] = cssValue~rep(op~cssValue) ^^ {
+  def expr: Parser[Value] = value~rep(op~value) ^^ {
     case x~list => list.foldLeft(x)((r,n) => n match {case o~y => o(r,y)})
   }
   
-  def cssValue: Parser[Value] = parens | length | number | color | string | failure("Not a valid value")
+  def value: Parser[Value] = parens | length | number | color | string | failure("Not a valid value")
 
   def parens: Parser[Value] = sp~"("~sp~> expr <~sp~")"~sp
   
@@ -159,7 +159,7 @@ class SassCompiler extends JavaTokenParsers {
     rep(property(curIndent)|nestedProperties(curIndent)) ^^ {pl => pl.flatMap(p => p)}
   
   def property(curIndent: Int): Parser[List[Property]] =
-    indent(curIndent) ~> propertyName ~ value <~ lf ^^ {case p~v => List(Property(p,v))}
+    indent(curIndent) ~> propertyName ~ propertyValue <~ lf ^^ {case p~v => List(Property(p,v))}
   
   def nestedProperties(curIndent: Int): Parser[List[Property]] =
     indent(curIndent) ~> (propertyName <~ lf) ~ rep1(property(curIndent + 2)) ^^ {
@@ -167,7 +167,7 @@ class SassCompiler extends JavaTokenParsers {
   
   def propertyName: Parser[String] = ":" ~> """[a-zA-Z0-9\-]+""".r
   
-  def value: Parser[String] = sp ~> """[^\n]+""".r <~ sp
+  def propertyValue: Parser[String] = sp ~> """[^\n]+""".r <~ sp
   
   def indent(expected: Int): Parser[String] = ("""\ """+"{"+expected+"}").r 
   
