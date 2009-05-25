@@ -142,7 +142,7 @@ class SassCompiler extends JavaTokenParsers {
     }._1
   }
   
-  def constant: Parser[Constant] = ("""!\S+""".r <~sp~"=")~value <~lf ^^ {
+  def constant: Parser[Constant] = ("""!\S+""".r <~sp~"=")~propertyValue <~lf ^^ {
     case k~v => Constant(k,v)}
   
   def ruleset(curIndent: Int): Parser[RuleSet] =
