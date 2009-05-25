@@ -113,7 +113,7 @@ class SassCompiler extends JavaTokenParsers {
       case _ => super.oper(that,o,n)
     }
     private def colorHex(value: Int): String = value match {
-      case x if x > 255 => "FF"
+      case x if x > 255 => "ff"
       case x if x < 0 => "00"
       case x => String.format("%02x", int2Integer(x))
     }
