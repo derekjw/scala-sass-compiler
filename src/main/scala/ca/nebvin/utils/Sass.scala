@@ -83,12 +83,16 @@ class SassCompiler extends JavaTokenParsers {
 
   object Value {
     implicit def text2String(in: Text) = in.toString
+    implicit def double2Number(in: Double) = Number(in)
+    implicit def number2Double(in: Number) = in.toDouble
   }
 
   case class Number(value: Double) extends Value {
     override def toString = """\.0+$""".r.replaceFirstIn(value.toString, "")
+    def toDouble = value
     override def oper(that: Value, o:ValueOp, n:NumberOp): Value = that match {
       case Number(x) => Number(n(value,x))
+      case Length(x, u) => Length(n(value,x), u)
       case _ => super.oper(that,o,n)
     }
   }
@@ -104,15 +108,16 @@ class SassCompiler extends JavaTokenParsers {
   case class Color(red: Int, green: Int, blue: Int) extends Value {
     override def toString = "#" + colorHex(red) + colorHex(green) + colorHex(blue)
     override def oper(that: Value, o: ValueOp, n: NumberOp): Value = that match {
-      case Color(r,g,b) => Color(n(red,r).toInt, n(green,g).toInt, n(blue,b).toInt)
-      case Number(n) => o(this,Color(n.toInt,n.toInt,n.toInt))
+      case Color(r,g,b) => Color(n(red,r), n(green,g), n(blue,b))
+      case Number(n) => o(this,Color(n,n,n))
       case _ => super.oper(that,o,n)
     }
     private def colorHex(value: Int): String = value match {
       case x if x > 255 => "FF"
       case x if x < 0 => "00"
-      case x => String.format("%02X", int2Integer(x))
+      case x => String.format("%02x", int2Integer(x))
     }
+    private implicit def double2Int(in: Double): Int = in.toInt
   }
   
   case class Length(value: Number, unit: String) extends Value {

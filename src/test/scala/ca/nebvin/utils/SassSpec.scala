@@ -50,9 +50,9 @@ object SassSpec extends Specification {
       result.get must beEqualTo("div#main a { background-color:#253647; }\n")
     } 
     "parse a script with complex calculated constants" in {
-      val result = Sass("!partial_border = 5px / 2 \"solid\"\n!test_color = #123\n!other_color = !test_color - 1\n!border = !partial_border (!other_color + #111)\ndiv#main a\n  :border = !border\ndiv#other\n  :border = 2px (!other_color + #222) dashed\n")
+      val result = Sass("!partial_border = 5px / 2 \"solid\"\n!test_color = #123\n!other_color = !test_color - 1\n!border = !partial_border (!other_color + #111)\ndiv#main a\n  :border = !border\ndiv#other\n  :border = 10/2px (!other_color + #222) dashed\n")
       result.successful mustBe true
-      result.get must beEqualTo("div#main a { border:2.5px solid #213243; }\ndiv#other { border:2px #324354 dashed; }\n")
+      result.get must beEqualTo("div#main a { border:2.5px solid #213243; }\ndiv#other { border:5px #324354 dashed; }\n")
     } 
   }
 }
