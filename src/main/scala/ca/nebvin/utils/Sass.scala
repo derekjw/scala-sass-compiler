@@ -32,7 +32,7 @@ class SassCompiler extends JavaTokenParsers {
   def string: Parser[Text] = (quotedString | unquotedString) ^^ {Text(_)}
   
   def quotedString: Parser[String] = "\"" ~> opt("""([^"\p{Cntrl}\\]|\\[\\/bfnrt]|\\u[a-fA-F0-9]{4})+""".r) <~ "\"" ^^ {_.getOrElse("")} 
-  def unquotedString: Parser[String] = """[^()"]\S*""".r
+  def unquotedString: Parser[String] = """[^()"\s]+""".r
   
   def length: Parser[Length] = number ~ unit ^^ {case x~u => Length(x, u)}
   def unit: Parser[String] = sp~>"em"|"px"|"pt"|"%"
