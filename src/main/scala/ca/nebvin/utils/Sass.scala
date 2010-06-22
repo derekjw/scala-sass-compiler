@@ -1,4 +1,4 @@
-package ca.nebvin.utils
+package ca.fyrie.utils
 
 import scala.util.parsing.combinator._
 
