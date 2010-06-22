@@ -1,22 +1,28 @@
 package ca.fyrie.utils
 
 import scala.util.parsing.combinator._
+import lexical.StdLexical
+import syntactical.StdTokenParsers
+import token.StdTokens
 
 object Sass {
   def apply(in: String)= {
     val c = new SassCompiler
-    c.parseAll(c.script, in)
+    c.parse(in)
   }
 }
 
-class SassCompiler extends JavaTokenParsers {
-  override val whiteSpace = "".r
+class SassCompiler extends StdTokenParsers with PackratParsers with ImplicitConversions {
+  type Tokens = SassTokens
+  import lexical.NumericColor
+  
+  override val lexical = new SassLexer
 
-  def expr: Parser[Value] = value~rep(op~value) ^^ {
+  val expr: PackratParser[Value] = value~rep(op~value) ^^ {
     case x~list => list.foldLeft(x)((r,n) => n match {case o~y => o(r,y)})
   }
   
-  def value: Parser[Value] = parens | length | number | color | string | failure("Not a valid value")
+  val value: PackratParser[Value] = parens | length | number | color | string | failure("Not a valid value")
 
   def parens: Parser[Value] = sp~"("~sp~> expr <~sp~")"~sp
   
@@ -27,47 +33,43 @@ class SassCompiler extends JavaTokenParsers {
             | "/" ^^^ {(l: Value, r: Value) => l / r}
             ) <~sp ^^ {_.getOrElse((l: Value, r: Value) => l << r)}
 
-  def number: Parser[Number] = decimalNumber ^^ {x => Number(x.toDouble)}
+  def number: Parser[Number] = numericLit ^^ {x => Number(x.toDouble)}
 
-  def string: Parser[Text] = (quotedString | unquotedString) ^^ {Text(_)}
-  
-  def quotedString: Parser[String] = "\"" ~> opt("""([^"\p{Cntrl}\\]|\\[\\/bfnrt]|\\u[a-fA-F0-9]{4})+""".r) <~ "\"" ^^ {_.getOrElse("")} 
-  def unquotedString: Parser[String] = """[^()"\s]+""".r
-  
+  def string: Parser[Text] = (stringLit | ident) ^^ {Text(_)}
+
   def length: Parser[Length] = number ~ unit ^^ {case x~u => Length(x, u)}
   def unit: Parser[String] = sp~>"em"|"px"|"pt"|"%"
   
-  def color: Parser[Color] = longColor | shortColor
-  
-  def shortColor: Parser[Color] = "#"~>repN(3, hexColor(1)) ^^ {x =>
-    val ints: List[Int] = x.map(h => hex2Int(h+h))
-    Color(ints(0),ints(1),ints(2))
+  // This is ugly... refactor later
+  def color: Parser[Color] = numericColor ^^ { x =>
+    (x.length match {
+      case 3 => x.grouped(1).map(d => hex2Int(d+d)).toList
+      case 6 => x.grouped(2).map(hex2Int).toList
+    }) match {
+      case r :: g :: b :: Nil => Color(r,g,b)
+    }
   }
-  def longColor: Parser[Color] = "#"~>repN(3, hexColor(2)) ^^ {x =>
-    val ints: List[Int] = x.map(h => hex2Int(h))
-    Color(ints(0),ints(1),ints(2))
-  }
-  def hexColor(length: Int): Parser[String] = ("""[0-9a-fA-F]{"""+length+"}").r
+
   def hex2Int(hex: String): Int = Integer.valueOf(hex, 16).intValue()
+
+  def sp: Parser[String] = rep(" ") ^^ {_.mkString}
+  def sp1: Parser[String] = rep1(" ") ^^ {_.mkString}
+  val lf: Parser[String] = rep1(sp ~ "\n") ^^ {_.mkString}
   
-  val ws = """\s*""".r
-  val ws1 = """\s+""".r
-  val sp = """\ *""".r
-  val sp1 = """\ +""".r
-  val lf = """\s*(\n|\z)""".r  
-  
-  def parseConstant(expression: String) = parseAll(expr, expression) match {
-    case x if x.successful => x.get.toString
-    case x => x.toString
-  } 
+  def parseConstant(in: String) = {
+    phrase(expr)(new lexical.Scanner(in)) match {
+      case Success(res, _) => res.toString
+      case x => x.toString
+    }
+  }
   
   def replaceConstants(value: String, lookup: Map[String, String]): String = {
     val newValue = ConstantValueRegex.findAllIn(value).foldLeft(value)((r, m) => r.replace(m, lookup.getOrElse(m,m)))
     if (newValue == value) value else replaceConstants(newValue, lookup)
   }
   val ConstantValueRegex = """(!\S+)""".r
-  val ShortColor = """#([0-9a-fA-F]{1})([0-9a-fA-F]{1})([0-9a-fA-F]{1})""".r
-  val LongColor = """#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})""".r
+//  val ShortColor = """#([0-9a-fA-F]{1})([0-9a-fA-F]{1})([0-9a-fA-F]{1})""".r
+//  val LongColor = """#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})""".r
   
   sealed abstract class Value {
     type ValueOp = (Value,Value) => Value
@@ -129,7 +131,7 @@ class SassCompiler extends JavaTokenParsers {
     }
   }
 
-  def script: Parser[String] = ws~> rep1(rep(constant)~rep1(ruleset(0))) <~ws ^^ {
+  def script: Parser[String] = rep1(rep(constant)~rep1(ruleset(0))) ^^ {
     _.foldLeft(("",Map[String,String]())){(r,s) =>
       val (css, constantMap) = r
       s match {
@@ -142,7 +144,7 @@ class SassCompiler extends JavaTokenParsers {
     }._1
   }
   
-  def constant: Parser[Constant] = ("""!\S+""".r <~sp~"=")~propertyValue <~lf ^^ {
+  def constant: Parser[Constant] = ("!"~> ident <~sp~"=")~propertyValue <~lf ^^ {
     case k~v => Constant(k,v)}
   
   def ruleset(curIndent: Int): Parser[RuleSet] =
@@ -153,7 +155,7 @@ class SassCompiler extends JavaTokenParsers {
     indent(curIndent) ~> rep1sep(selector, ",") <~ lf
   
   def selector: Parser[Selector] =
-    sp ~> """[^",:\n][^",\n]*""".r <~ sp ^^ {Selector(_)}
+    sp ~> ident <~ sp ^^ {Selector(_)}
   
   def properties(curIndent: Int): Parser[List[Property]] =
     rep(property(curIndent)|nestedProperties(curIndent)) ^^ {pl => pl.flatMap(p => p)}
@@ -165,11 +167,11 @@ class SassCompiler extends JavaTokenParsers {
     indent(curIndent) ~> (propertyName <~ lf) ~ rep1(property(curIndent + 2)) ^^ {
       case p~npl => npl.map(np => Property(p+"-"+np.head.name, np.head.value))}
   
-  def propertyName: Parser[String] = ":" ~> """[a-zA-Z0-9\-]+""".r
+  def propertyName: Parser[String] = ":" ~> ident
   
-  def propertyValue: Parser[String] = sp ~> """[^\n]+""".r <~ sp
+  def propertyValue: Parser[String] = sp ~> ident <~ sp
   
-  def indent(expected: Int): Parser[String] = ("""\ """+"{"+expected+"}").r 
+  def indent(expected: Int): Parser[String] = repN(expected, " ") ^^ (_.mkString)
   
   case class Property(val name: String, val value: String) {
     override def toString = name + ":" + value + ";"
@@ -198,4 +200,64 @@ class SassCompiler extends JavaTokenParsers {
   }
 
   case class Constant(val name: String, val value: String)
+
+  def numericColor: Parser[String] =
+    elem("numeric color", _.isInstanceOf[NumericColor]) ^^ (_.chars)
+
+  def parse(in: String) = {
+    phrase(script)(new lexical.Scanner(in)) /*match {
+      case Success(res, _) => res
+      case x => x.toString
+    }*/
+  }
+
+}
+
+class SassLexer extends StdLexical with SassTokens {
+  override def token: Parser[Token] = numericColorToken | floatingToken | super.token
+
+  def numericColorToken: Parser[Token] =
+    '#' ~> (repN(6, hexDigit)|repN(3, hexDigit)) ^^ {case chars => NumericColor(chars mkString "")}
+
+  val hexDigits = Set[Char]() ++ "0123456789abcdefABCDEF".toArray
+  def hexDigit = elem("hex digit", hexDigits.contains(_))
+
+  def floatingToken: Parser[Token] =
+    rep1(digit) ~ optFraction ~ optExponent ^^ {
+      case intPart ~ frac ~ exp => NumericLit(
+        (intPart mkString "") :: frac :: exp :: Nil mkString "")}
+
+  def chr(c:Char) = elem("", ch => ch==c )
+  def sign = chr('+') | chr('-')
+  def optSign = opt(sign) ^^ {
+    case None => ""
+    case Some(sign) => sign
+  }
+
+  def fraction = '.' ~ rep(digit) ^^ {
+    case dot ~ ff => dot :: (ff mkString "") :: Nil mkString ""
+  }
+
+  def optFraction = opt(fraction) ^^ {
+    case None => ""
+    case Some(fraction) => fraction
+  }
+
+  def exponent = (chr('e') | chr('E')) ~ optSign ~ rep1(digit) ^^ {
+    case e ~ optSign ~ exp => e :: optSign :: (exp mkString "") :: Nil mkString ""
+  }
+
+  def optExponent = opt(exponent) ^^ {
+    case None => ""
+    case Some(exponent) => exponent
+  }
+
+}
+
+trait SassTokens extends StdTokens {
+  
+  case class NumericColor(chars: String) extends Token {
+    override def toString = chars
+  }
+
 }
