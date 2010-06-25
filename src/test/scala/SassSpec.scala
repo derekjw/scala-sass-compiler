@@ -17,10 +17,11 @@ class SassSpec extends Specification {
     "parse a simple script with 2 selector lists" in {
       val result = Sass("div#main a, .sidebar p\n  :font-size 10px\n  :font-color black\n\nh1\n  :font-size 1em\n")
       result.successful mustBe true
+      result.get must beEqualTo("div#main a, .sidebar p { font-size:10px; font-color:black; }\nh1 { font-size:1em; }\n")
     }
 
     "parse a script with child rulesets" in {
-      val result = Sass("div#main a, .sidebar p\n  :font-size 10px\n  :font-color black\n  h1\n    span, div\n      :font-family Arial")
+      val result = Sass("div#main a, .sidebar p\n  :font-size 10px\n  :font-color black\n  h1\n    span, div\n      :font-family Arial\n")
       result.successful mustBe true
       result.get must beEqualTo("div#main a, .sidebar p { font-size:10px; font-color:black; }\ndiv#main a h1 span, div#main a h1 div, .sidebar p h1 span, .sidebar p h1 div { font-family:Arial; }\n")
     }
