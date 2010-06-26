@@ -1,9 +1,7 @@
-package ca.fyrie.utils
+package ca.fyrie
+package sass
 
-import scala.util.parsing.combinator._
-import scala.util.parsing.input._
-import scala.collection.immutable.PagedSeq
-import CharArrayReader.EofCh
+import parsing.CharParsers
 
 object Sass {
   def apply(in: String)= {
@@ -12,8 +10,7 @@ object Sass {
   }
 }
 
-class SassCompiler extends Parsers {
-  type Elem = Char
+class SassCompiler extends CharParsers {
 
   def expr: Parser[Value] = value~rep(op~value) ^^ {
     case x~list => list.foldLeft(x)((r,n) => n match {case o~y => o(r,y)})
@@ -40,20 +37,20 @@ class SassCompiler extends Parsers {
   def color: Parser[Color] = longColor | shortColor
   
   def shortColor: Parser[Color] =
-    '#' ~> repN(3, hexDigit) ^^ {case List(r,g,b) => Color(hex2Int(r+r),hex2Int(g+g),hex2Int(b+b))}
+    '#' ~> repN(3, hexDigit) ^^ {
+      c =>
+        val List(r,g,b) = c.map(_.toString).map(x => x+x).map(hex2Int)
+        Color(r,g,b)
+    }
 
   def longColor: Parser[Color] =
-    '#' ~> repN(6, hexDigit) ^^ {case List(r1,r2,g1,g2,b1,b2) => Color(hex2Int(r1+r2),hex2Int(g1+g2),hex2Int(b1+b2))}
-
-  def hexDigit: Parser[String] = (digit|"a"|"b"|"c"|"d"|"e"|"f"|"A"|"B"|"C"|"D"|"E"|"F") ^^ (_.toString)
+    '#' ~> repN(6, hexDigit) ^^ {
+      c =>
+        val List(r,g,b) = c.grouped(2).map(_.mkString).map(hex2Int).toList
+        Color(r,g,b)
+    }
 
   def hex2Int(hex: String): Int = Integer.valueOf(hex, 16).intValue()
-
-  def sp: Parser[String] = rep(' ') ^^ {_.mkString}
-  def sp1: Parser[String] = rep1(' ') ^^ {_.mkString}
-  def lf: Parser[String] = rep1(sp ~ "\n") ^^ {_.mkString}
-  def ws: Parser[String] = rep("\n"|"\t"|" ") ^^ {_.mkString}
-  def eof: Parser[Char] = EofCh
   
   def parseConstant(expression: String) = parse(expr, expression) match {
     case x if x.successful => x.get.toString
@@ -65,66 +62,7 @@ class SassCompiler extends Parsers {
     if (newValue == value) value else replaceConstants(newValue, lookup)
   }
   val ConstantValueRegex = """(!\S+)""".r
-  
-  sealed abstract class Value {
-    type ValueOp = (Value,Value) => Value
-    type NumberOp = (Double,Double) => Double
-    def << (that: Value): Value = Text(toString+" "+that)
-    def + (that: String): Text = Text(toString+that)
-    def + (that: Value): Value = oper(that, (_+_), (_+_))
-    def - (that: Value): Value = oper(that, (_-_), (_-_))
-    def * (that: Value): Value = oper(that, (_*_), (_*_))
-    def / (that: Value): Value = oper(that, (_/_), (_/_))
-    protected def oper(that: Value, o:ValueOp, n:NumberOp): Value = o(Text(toString), that)
-  }
-
-  object Value {
-    implicit def text2String(in: Text) = in.toString
-    implicit def double2Number(in: Double) = Number(in)
-    implicit def number2Double(in: Number) = in.toDouble
-  }
-
-  case class Number(value: Double) extends Value {
-    override def toString = """\.0+$""".r.replaceFirstIn(value.toString, "")
-    def toDouble = value
-    override def oper(that: Value, o:ValueOp, n:NumberOp): Value = that match {
-      case Number(x) => Number(n(value,x))
-      case Length(x, u) => Length(n(value,x), u)
-      case _ => super.oper(that,o,n)
-    }
-  }
-
-  case class Text(value: String) extends Value {
-    override def + (that: Value): Value = this+that.toString
-    override def - (that: Value): Value = this+"-"+that.toString
-    override def * (that: Value): Value = this+"*"+that.toString
-    override def / (that: Value): Value = this+"/"+that.toString
-    override def toString = value
-  }
-  
-  case class Color(red: Int, green: Int, blue: Int) extends Value {
-    override def toString = "#" + colorHex(red) + colorHex(green) + colorHex(blue)
-    override def oper(that: Value, o: ValueOp, n: NumberOp): Value = that match {
-      case Color(r,g,b) => Color(n(red,r), n(green,g), n(blue,b))
-      case Number(n) => o(this,Color(n,n,n))
-      case _ => super.oper(that,o,n)
-    }
-    private def colorHex(value: Int): String = value match {
-      case x if x > 255 => "ff"
-      case x if x < 0 => "00"
-      case x => String.format("%02x", int2Integer(x))
-    }
-    private implicit def double2Int(in: Double): Int = in.toInt
-  }
-
-  case class Length(value: Number, unit: String) extends Value {
-    override def toString = value + unit
-    override def oper(that: Value, o:ValueOp, n:NumberOp): Value = that match {
-      case Length(x,_) => Length(o(value,x).asInstanceOf[Number], unit)
-      case x: Number => Length(o(value,x).asInstanceOf[Number], unit)
-      case _ => super.oper(that,o,n)
-    }
-  }
+ 
 
   def script: Parser[String] = rep1(rep(constant)~rep1(ruleset(0))) <~ eof ^^ {
     _.foldLeft(("",Map[String,String]())){(r,s) =>
@@ -196,39 +134,67 @@ class SassCompiler extends Parsers {
 
   case class Constant(val name: String, val value: String)
 
-  def letter = elem("letter", _.isLetter)
-
-  def digit = elem("digit", _.isDigit)
-
-  def ident: Parser[String] = rep1(letter|'_') ^^ (_.mkString)
-
-  def num: Parser[String] = rep1(digit) ^^ (_.mkString)
-
-  def string = '"' ~> rep(elem("any", (x => true)))  <~ '"' ^^ (_.mkString)
-
-  implicit def literal(in: Char): Parser[Char] = elem(in)
-
-  implicit def literal(s: String): Parser[String] = new Parser[String] {
-    def apply(in: Input) = {
-      val source = in.source
-      val offset = in.offset
-      var i = 0
-      var j = offset
-      while (i < s.length && j < source.length && s.charAt(i) == source.charAt(j)) {
-        i += 1
-        j += 1
-      }
-      if (i == s.length)
-        Success(source.subSequence(offset, j).toString, in.drop(j - offset))
-      else 
-        Failure("`"+s+"' expected but `"+in.first+"' found", in)
-    }
-  }
-
-  def parse[T](p: Parser[T], in: Reader[Char]): ParseResult[T] = p(in)
-  def parse[T](p: Parser[T], in: java.lang.CharSequence): ParseResult[T] = p(new CharSequenceReader(in))
-  def parse[T](p: Parser[T], in: java.io.Reader): ParseResult[T] = p(new PagedSeqReader(PagedSeq.fromReader(in)))
-  def parse(in: Reader[Char]): ParseResult[String] = parse(script,in)
+  def parse(in: scala.util.parsing.input.Reader[Char]): ParseResult[String] = parse(script,in)
   def parse(in: java.lang.CharSequence): ParseResult[String] = parse(script,in)
   def parse(in: java.io.Reader): ParseResult[String] = parse(script,in)
+}
+
+sealed abstract class Value {
+  type ValueOp = (Value,Value) => Value
+  type NumberOp = (Double,Double) => Double
+  def << (that: Value): Value = Text(toString+" "+that)
+  def + (that: String): Text = Text(toString+that)
+  def + (that: Value): Value = oper(that, (_+_), (_+_))
+  def - (that: Value): Value = oper(that, (_-_), (_-_))
+  def * (that: Value): Value = oper(that, (_*_), (_*_))
+  def / (that: Value): Value = oper(that, (_/_), (_/_))
+  protected def oper(that: Value, o:ValueOp, n:NumberOp): Value = o(Text(toString), that)
+}
+
+object Value {
+  implicit def text2String(in: Text) = in.toString
+  implicit def double2Number(in: Double) = Number(in)
+  implicit def number2Double(in: Number) = in.toDouble
+}
+
+case class Number(value: Double) extends Value {
+  override def toString = """\.0+$""".r.replaceFirstIn(value.toString, "")
+  def toDouble = value
+  override def oper(that: Value, o:ValueOp, n:NumberOp): Value = that match {
+    case Number(x) => Number(n(value,x))
+    case Length(x, u) => Length(n(value,x), u)
+    case _ => super.oper(that,o,n)
+  }
+}
+
+case class Text(value: String) extends Value {
+  override def + (that: Value): Value = this+that.toString
+  override def - (that: Value): Value = this+"-"+that.toString
+  override def * (that: Value): Value = this+"*"+that.toString
+  override def / (that: Value): Value = this+"/"+that.toString
+  override def toString = value
+}
+
+case class Color(red: Int, green: Int, blue: Int) extends Value {
+  override def toString = "#" + colorHex(red) + colorHex(green) + colorHex(blue)
+  override def oper(that: Value, o: ValueOp, n: NumberOp): Value = that match {
+    case Color(r,g,b) => Color(n(red,r), n(green,g), n(blue,b))
+    case Number(n) => o(this,Color(n,n,n))
+    case _ => super.oper(that,o,n)
+  }
+  private def colorHex(value: Int): String = value match {
+    case x if x > 255 => "ff"
+    case x if x < 0 => "00"
+    case x => String.format("%02x", int2Integer(x))
+  }
+  private implicit def double2Int(in: Double): Int = in.toInt
+}
+
+case class Length(value: Number, unit: String) extends Value {
+  override def toString = value + unit
+  override def oper(that: Value, o:ValueOp, n:NumberOp): Value = that match {
+    case Length(x,_) => Length(o(value,x).asInstanceOf[Number], unit)
+    case x: Number => Length(o(value,x).asInstanceOf[Number], unit)
+    case _ => super.oper(that,o,n)
+  }
 }
