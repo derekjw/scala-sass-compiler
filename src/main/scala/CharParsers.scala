@@ -1,4 +1,4 @@
-package ca.fyrie.parsing
+package net.fyrie.parsing
 
 import scala.util.parsing.combinator._
 import scala.util.parsing.input._

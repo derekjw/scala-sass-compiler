@@ -1,4 +1,4 @@
-package ca.fyrie
+package net.fyrie
 package sass
 
 import parsing.CharParsers

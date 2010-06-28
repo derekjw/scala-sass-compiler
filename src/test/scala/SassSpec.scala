@@ -1,4 +1,4 @@
-package ca.fyrie.sass
+package net.fyrie.sass
 package specs
 
 import org.specs._
